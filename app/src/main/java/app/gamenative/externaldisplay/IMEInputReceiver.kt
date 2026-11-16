@@ -1,6 +1,9 @@
 package app.gamenative.externaldisplay
 
 import android.content.Context
+import android.text.Editable
+import android.text.Selection
+import android.text.SpannableStringBuilder
 import android.view.KeyEvent
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
@@ -8,14 +11,16 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import com.winlator.xserver.Pointer
+import com.winlator.xserver.XKeycode
 import com.winlator.xserver.XServer
+import com.winlator.xserver.unicodeKeysym
 import kotlinx.coroutines.delay
 import timber.log.Timber
 
 /**
  * Invisible view that receives IME (soft keyboard) input from Android system keyboard
  * and forwards it to XServer as keyboard events for the game.
- * 
+ *
  * This is needed when the system keyboard is pinned to the external display
  */
 class IMEInputReceiver(
@@ -45,9 +50,48 @@ class IMEInputReceiver(
             ')', '!', '@', '#', '$', '%', '^', '&', '*', '(',
             '_', '+', '{', '}', '|', ':', '"', '<', '>', '?', '~',
         )
+
+        private const val BACKSPACE = '\b'
+        private const val ENTER = '\n'
+        private const val TAB = '\t'
+        private const val ESCAPE = '\u001b'
+
+        // Not a key: a wait in the queue of keystrokes, for when the game needs a moment to act on the one before.
+        private const val PAUSE = '\u0000'
+        private const val PAUSE_MS = 200L
+
+        // Wine reads a spare key's character when the game gets round to the keystroke, so the same spare key must not
+        // be pointed at another character before then. This gap spaces out a burst, such as a paste.
+        private const val SPARE_KEY_GAP_MS = 12L
+
+        // Far past any chat line. A line that never ends would otherwise keep growing.
+        private const val MAX_LINE_LENGTH = 400
     }
 
+    /** Called with the line being typed, to show it while the keyboard covers the game's own text field. */
+    var onLineChanged: ((String) -> Unit)? = null
+
     private var imeSessionActive = false
+
+    // Whether the keyboard was brought up for chat, which keeps the game's chat box open for as long as it's up.
+    private var chatting = false
+
+    // The line the keyboard is editing, and the keystrokes that keep the game's text field in step with it.
+    private val line = SpannableStringBuilder()
+    private val mirror = ImeTextMirror(
+        object : ImeTextMirror.Keys {
+            // Enter and Tab act on the game's field instead of adding to it, so they are never part of a line.
+            override fun canType(char: Char) =
+                char != ENTER && char != TAB && (charToKeyDispatch(char) != null || unicodeKeysym(char.code) != 0)
+
+            override fun type(char: Char) = sendKey(char)
+
+            override fun backspace() = sendKey(BACKSPACE)
+        },
+    )
+    private val pendingKeys = ArrayDeque<Char>()
+    private var sendingKeys = false
+    private val resumeKeys = Runnable { drainKeys() }
 
     init {
         isFocusable = false
@@ -69,43 +113,129 @@ class IMEInputReceiver(
         }
 
         Timber.d("IMEInputReceiver: onCreateInputConnection called!")
-        // Disable autocomplete/suggestions so each key commits immediately
-        outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT or 
-                             EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
-                             EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or 
-                              EditorInfo.IME_FLAG_NO_EXTRACT_UI or
-                              EditorInfo.IME_ACTION_NONE
-        
-        return object : BaseInputConnection(this, false) {
-            override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                Timber.d("IMEInputReceiver: commitText called with: '$text'")
-                text?.let(::typeText)
-                return true
-            }
+        // Plain text, so the keyboard offers every language it has: a password field is often held to ASCII. What's
+        // typed here includes logins and names no dictionary knows, so suggestions and learning are off.
+        outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT or EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or
+            EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+            EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or
+            EditorInfo.IME_ACTION_NONE
+        outAttrs.initialSelStart = Selection.getSelectionStart(line).coerceAtLeast(0)
+        outAttrs.initialSelEnd = Selection.getSelectionEnd(line).coerceAtLeast(0)
 
-            override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                Timber.d("IMEInputReceiver: deleteSurroundingText called")
-                if (beforeLength > 0) {
-                    repeat(beforeLength) {
-                        xServer.injectKeyPress(com.winlator.xserver.XKeycode.KEY_BKSP, 0)
-                        xServer.injectKeyRelease(com.winlator.xserver.XKeycode.KEY_BKSP)
-                    }
-                    Timber.v("IMEInputReceiver: Sent backspace x$beforeLength")
-                }
-                return true
-            }
+        return GameInputConnection()
+    }
 
-            override fun sendKeyEvent(event: KeyEvent): Boolean {
-                if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_DEL) {
-                    xServer.injectKeyPress(com.winlator.xserver.XKeycode.KEY_BKSP, 0)
-                    xServer.injectKeyRelease(com.winlator.xserver.XKeycode.KEY_BKSP)
-                    Timber.v("IMEInputReceiver: Sent backspace from sendKeyEvent")
-                    return true
-                }
-                return super.sendKeyEvent(event)
+    /**
+     * Lets the keyboard edit [line] like any text field and replays each edit in the game as keystrokes. Editing a
+     * real line, composing text included, is what makes languages that build characters as you type come out right.
+     */
+    private inner class GameInputConnection : BaseInputConnection(this@IMEInputReceiver, true) {
+        override fun getEditable(): Editable = line
+
+        override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+            var rest = text?.toString().orEmpty()
+            while (true) {
+                val end = rest.indexOfFirst { it == ENTER || it == TAB }
+                if (end < 0) break
+                super.commitText(rest.substring(0, end), 1)
+                endLine(rest[end])
+                rest = rest.substring(end + 1)
+            }
+            return super.commitText(rest, newCursorPosition).also { lineEdited() }
+        }
+
+        override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean =
+            super.setComposingText(text, newCursorPosition).also { lineEdited() }
+
+        override fun finishComposingText(): Boolean = super.finishComposingText().also { lineEdited() }
+
+        override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+            val beforeCursor = Selection.getSelectionStart(line).coerceAtLeast(0)
+            return super.deleteSurroundingText(beforeLength, afterLength).also {
+                lineEdited()
+                backspacePastLineStart(beforeLength - beforeCursor)
             }
         }
+
+        override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+            val beforeCursor = Character.codePointCount(line, 0, Selection.getSelectionStart(line).coerceAtLeast(0))
+            return super.deleteSurroundingTextInCodePoints(beforeLength, afterLength).also {
+                lineEdited()
+                backspacePastLineStart(beforeLength - beforeCursor)
+            }
+        }
+
+        override fun performEditorAction(actionCode: Int): Boolean {
+            endLine(ENTER)
+            return true
+        }
+
+        override fun sendKeyEvent(event: KeyEvent): Boolean {
+            val pressed = event.action == KeyEvent.ACTION_DOWN
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DEL -> if (pressed) deleteSurroundingText(1, 0)
+                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> if (pressed) endLine(ENTER)
+                KeyEvent.KEYCODE_TAB -> if (pressed) endLine(TAB)
+                else -> {
+                    // Keyboards send some characters, digits among them, as key presses. Those join the line like any
+                    // other text. Keys with no character go to the game as they are.
+                    val char = event.unicodeChar
+                    if (char <= 0 || event.isCtrlPressed || event.isAltPressed) return super.sendKeyEvent(event)
+                    if (pressed) commitText(String(Character.toChars(char)), 1)
+                }
+            }
+            return true
+        }
+    }
+
+    private fun lineEdited() {
+        mirror.sync(line)
+        onLineChanged?.invoke(line.toString())
+        if (line.length > MAX_LINE_LENGTH) startNewLine()
+    }
+
+    /** Backspace at the start of the line reaches text that was in the game's field before this line began. */
+    private fun backspacePastLineStart(count: Int) {
+        repeat(count.coerceAtLeast(0)) { sendKey(BACKSPACE) }
+    }
+
+    /** Presses [key] on the line as it stands (Enter sends it, Tab moves to the next field) and starts a new one. */
+    private fun endLine(key: Char) {
+        BaseInputConnection.removeComposingSpans(line)
+        mirror.sync(line)
+        sendKey(key)
+        startNewLine()
+        // Sending a chat line closes the chat box, and the next one needs it open again. The game has to finish with
+        // the first Enter before the second one means "open".
+        if (chatting && key == ENTER) {
+            sendKey(PAUSE)
+            openChatBox()
+        }
+    }
+
+    private fun openChatBox() {
+        sendKey(ENTER)
+    }
+
+    /** Closes the chat box that [openChat] kept open. Escape also throws away a line that wasn't sent. */
+    private fun closeChatBox() {
+        if (!chatting) return
+        chatting = false
+        sendKey(ESCAPE)
+    }
+
+    private fun startNewLine() {
+        clearLine()
+        // The keyboard still remembers the old line. Restarting makes it read the empty one.
+        inputMethodManager()?.restartInput(this)
+    }
+
+    private fun clearLine() {
+        line.clear()
+        Selection.setSelection(line, 0)
+        mirror.reset()
+        onLineChanged?.invoke("")
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
@@ -122,7 +252,48 @@ class IMEInputReceiver(
     )
 
     fun typeText(text: CharSequence) {
-        text.forEach(::sendCharacterToGame)
+        text.forEach(::sendKey)
+    }
+
+    // Keystrokes go out in order, one queue for every kind, so a character that borrows a spare key can't be overtaken
+    // by the ones typed after it.
+    private fun sendKey(key: Char) {
+        pendingKeys.addLast(key)
+        if (!sendingKeys) drainKeys()
+    }
+
+    private fun drainKeys() {
+        sendingKeys = true
+        while (pendingKeys.isNotEmpty()) {
+            val key = pendingKeys.removeFirst()
+            if (key == PAUSE) {
+                postDelayed(resumeKeys, PAUSE_MS)
+                return
+            }
+            val usedSpareKey = pressKey(key)
+            if (usedSpareKey && pendingKeys.isNotEmpty()) {
+                postDelayed(resumeKeys, SPARE_KEY_GAP_MS)
+                return
+            }
+        }
+        sendingKeys = false
+    }
+
+    /** Sends one keystroke to the game. Returns whether it borrowed a spare key, which calls for a pause after it. */
+    private fun pressKey(key: Char): Boolean {
+        when {
+            key == BACKSPACE -> {
+                xServer.injectKeyPress(XKeycode.KEY_BKSP, 0)
+                xServer.injectKeyRelease(XKeycode.KEY_BKSP)
+            }
+            key == ESCAPE -> {
+                xServer.injectKeyPress(XKeycode.KEY_ESC, 0)
+                xServer.injectKeyRelease(XKeycode.KEY_ESC)
+            }
+            charToKeyDispatch(key) != null -> sendCharacterToGame(key)
+            else -> return xServer.injectUnicodeChar(key.code)
+        }
+        return false
     }
 
     private fun sendCharacterToGame(char: Char) {
@@ -220,27 +391,48 @@ class IMEInputReceiver(
         return KeyDispatch(keyCode = keyCode, requiresShift = requiresShift)
     }
 
+    private fun inputMethodManager() =
+        displayContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+
     fun showKeyboard() {
         post {
+            if (!imeSessionActive) clearLine()
             imeSessionActive = true
             isFocusable = true
             isFocusableInTouchMode = true
             requestFocus()
-            val imm = displayContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+            inputMethodManager()?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             Timber.d("IMEInputReceiver: Requested to show keyboard")
+        }
+    }
+
+    /** Shows the keyboard with the game's chat box open, and keeps the box open until the keyboard is put away. */
+    fun openChat() {
+        showKeyboard()
+        post {
+            chatting = true
+            openChatBox()
         }
     }
 
     fun hideKeyboard() {
         post {
-            val imm = displayContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            imm?.hideSoftInputFromWindow(windowToken, 0)
+            inputMethodManager()?.hideSoftInputFromWindow(windowToken, 0)
             clearFocus()
             imeSessionActive = false
             isFocusable = false
             isFocusableInTouchMode = false
+            closeChatBox()
+            clearLine()
             Timber.d("IMEInputReceiver: Requested to hide keyboard")
+        }
+    }
+
+    /** For a keyboard that was put away with its own hide key: the line it was editing is over. */
+    fun onKeyboardGone() {
+        post {
+            closeChatBox()
+            clearLine()
         }
     }
 }

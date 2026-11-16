@@ -558,6 +558,8 @@ fun XServerScreen(
     var debugGestureName by remember { mutableStateOf("") }
     var debugGestureKey by remember { mutableIntStateOf(0) }
     var keyboardRequestedFromOverlay by remember { mutableStateOf(false) }
+    // The line being typed on the Android keyboard, shown on screen because the keyboard covers the game's own field.
+    var typedLine by remember { mutableStateOf("") }
     var shouldForceResumeOnMenuClose by remember { mutableStateOf(false) }
     var showQuickMenu by remember { mutableStateOf(false) }
     // Some ROMs (e.g. RedMagic) deliver one back gesture both as KEYCODE_BACK and through OnBackInvokedCallback,
@@ -1738,6 +1740,7 @@ fun XServerScreen(
         AndroidView(
         modifier = Modifier
             .fillMaxSize()
+            .liftedAboveKeyboard()
             .pointerHoverIcon(PointerIcon.Default)
             .pointerInteropFilter { event ->
                 val hud = performanceHudView
@@ -1965,6 +1968,7 @@ fun XServerScreen(
                     alpha = 0f
                     isClickable = false
                 }
+                imeReceiver.onLineChanged = { typedLine = it }
                 frameLayout.addView(imeReceiver)
                 imeInputReceiver = imeReceiver
                 PluviaApp.imeInputReceiver = imeReceiver
@@ -2700,6 +2704,16 @@ fun XServerScreen(
                 }
             )
         }
+
+        // The typing buttons belong to touch play, so they come and go with the on-screen controls.
+        TypingAids(
+            showButtons = areControlsVisible && !isEditMode && !showQuickMenu,
+            line = typedLine,
+            onOpenChat = { imeInputReceiver?.openChat() },
+            onShowKeyboard = { imeInputReceiver?.showKeyboard() },
+            onHideKeyboard = { imeInputReceiver?.hideKeyboard() },
+            onKeyboardGone = { imeInputReceiver?.onKeyboardGone() },
+        )
 
         QuickMenu(
             isVisible = showQuickMenu,

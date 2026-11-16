@@ -291,6 +291,21 @@ public class XServer {
         }
     }
 
+    /**
+     * Types a character that has no key of its own (Hangul, for one) by pointing a spare keycode at it for the
+     * keystroke. Returns false for a character the keyboard mapping can't carry.
+     */
+    public boolean injectUnicodeChar(int codePoint) {
+        int keysym = UnicodeKeysym.unicodeKeysym(codePoint);
+        if (keysym == 0) return false;
+        try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
+            byte keycode = keyboard.nextSpareKeycode();
+            keyboard.setKeyPress(keycode, keysym);
+            keyboard.setKeyRelease(keycode);
+        }
+        return true;
+    }
+
     private void registerExtension(Extension ext, int[] nextEventId, int[] nextErrorId) {
         if (ext.getNumEvents() > 0) {
             ext.setFirstEventId((byte) nextEventId[0]);

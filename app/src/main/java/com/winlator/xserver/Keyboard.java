@@ -16,6 +16,10 @@ public class Keyboard {
     public static final short MAX_KEYCODE = 255;
     public static final short MIN_KEYCODE = 8;
     public final int[] keysyms = new int[KEYS_COUNT];
+    // Keycodes no key uses, lent out one keystroke at a time to type characters the keys can't produce. They stop at
+    // 127 because keycodes are held in signed bytes here.
+    private static final byte[] SPARE_KEYCODES = {92, 93, 94, 97, 98, 99, 100, 101, 102, 103, 109, 120, 121, 122, 123, 124, 125, 126, 127};
+    private int nextSpareKeycode;
     private final Bitmask modifiersMask = new Bitmask();
     private final XKeycode[] keycodeMap = createKeycodeMap();
     private final ArraySet<Byte> pressedKeys = new ArraySet<>();
@@ -42,6 +46,17 @@ public class Keyboard {
         int index = keycode - 8;
         keysyms[index*KEYSYMS_PER_KEYCODE+0] = minKeysym;
         keysyms[index*KEYSYMS_PER_KEYCODE+1] = majKeysym;
+    }
+
+    /**
+     * The next spare keycode in turn. Wine looks up a key's character when the game handles the keystroke, not when it
+     * arrives, so a spare keycode has to keep its character until then: taking them in turn leaves each one alone for
+     * as long as possible.
+     */
+    public byte nextSpareKeycode() {
+        byte keycode = SPARE_KEYCODES[nextSpareKeycode];
+        nextSpareKeycode = (nextSpareKeycode + 1) % SPARE_KEYCODES.length;
+        return keycode;
     }
 
     public boolean hasKeysym(byte keycode, int keysym) {
@@ -359,6 +374,13 @@ public class Keyboard {
         keyboard.setKeysyms(XKeycode.KEY_F12.getId(), 65481, 0);
         keyboard.setKeysyms(XKeycode.KEY_NUM_LOCK.getId(), 65407, 0);
         keyboard.setKeysyms(XKeycode.KEY_CAPS_LOCK.getId(), 65509, 0);
+        // Wine hands a virtual key to every keycode that has a keysym, in keycode order, each time the mapping changes.
+        // Seeding the spare keycodes up front fixes which one each gets. The placeholders are private-use characters
+        // ending in a zero byte, which Wine's keyboard layout detection passes over.
+        for (int i = 0; i < SPARE_KEYCODES.length; i++) {
+            int placeholder = UnicodeKeysym.unicodeKeysym(0xE000 + (i << 8));
+            keyboard.setKeysyms(SPARE_KEYCODES[i], placeholder, placeholder);
+        }
         return keyboard;
     }
 
