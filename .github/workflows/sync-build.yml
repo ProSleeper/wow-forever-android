@@ -1,0 +1,172 @@
+# Keeps this fork's builds in step with the original project and publishes them ready to install.
+#
+# Every two hours, and whenever something is pushed here, it merges the original's main branch into this fork's, and if
+# that differs from what the latest release was built from, it builds the APK, signs it and publishes it as a release.
+# The app looks for updates in this fork's releases, so a phone picks the new build up by itself.
+#
+# The merge is made for the build only and isn't pushed, because the token Actions runs with may not push changes to
+# workflow files, which the original makes now and then. If the original changes the same lines as this fork, the merge
+# fails and so does the run: merge the original by hand, push, and the next run carries on.
+#
+# Secret (Settings > Secrets and variables > Actions):
+#   SIGNING_KEYSTORE_BASE64  the keystore the app on the phone was signed with, base64-encoded (base64 -w0). It's the
+#                            Android debug keystore of the PC the first builds came from, hence the fixed passwords
+#                            below. A build signed with any other key can't be installed over the app.
+name: Sync with upstream and build
+
+on:
+  schedule:
+    - cron: "17 */2 * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-build
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/jaredgei/wow-forever-android.git
+  SIGNING_CERT_SHA256: eae67b5b22f97193efb9d3701ef5235163765957ac05ef54b5bfc4fe8d7661fe
+
+jobs:
+  sync-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge the original's latest changes
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags "$UPSTREAM_URL" main
+          echo "fork=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "upstream=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+          git merge --no-edit FETCH_HEAD
+
+      # The latest release's notes name the two commits it was built from.
+      - name: Check whether this is already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORK: ${{ steps.merge.outputs.fork }}
+          UPSTREAM: ${{ steps.merge.outputs.upstream }}
+        run: |
+          notes=$(gh release view --json body --jq .body 2> /dev/null || true)
+          if echo "$notes" | grep -q "$FORK" && echo "$notes" | grep -q "$UPSTREAM"; then
+            echo "Already released."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.check.outputs.build == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.check.outputs.build == 'true'
+
+      - name: Install SDK components
+        if: steps.check.outputs.build == 'true'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "build-tools;35.0.0" "ndk;27.3.13750724" "cmake;3.22.1" > /dev/null
+
+      # The original's version with this workflow's run number added, so every build here is newer than the last one
+      # to both Android and the app's update check, including one that only carries a change made in this fork.
+      - name: Set the version
+        if: steps.check.outputs.build == 'true'
+        id: version
+        run: |
+          name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts)
+          code=$(sed -n 's/^ *versionCode = \([0-9]*\)/\1/p' app/build.gradle.kts)
+          name="$name.$GITHUB_RUN_NUMBER"
+          code=$((code * 1000 + GITHUB_RUN_NUMBER))
+          sed -i "s/^\( *versionName = \)\".*\"/\1\"$name\"/; s/^\( *versionCode = \)[0-9]*/\1$code/" app/build.gradle.kts
+          grep -E '^ *version(Name|Code) = ' app/build.gradle.kts
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch bundled components
+        if: steps.check.outputs.build == 'true'
+        run: tools/fetch_components.sh
+
+      # As in the original's release workflow: the helper ships only as built here from source.
+      - name: Build the browser-login helper
+        if: steps.check.outputs.build == 'true' && hashFiles('tools/wow-session-bridge/build.sh') != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mingw-w64 > /dev/null
+          sh tools/wow-session-bridge/build.sh x86_64-w64-mingw32-gcc app/src/main/assets/wow-session-bridge.exe
+
+      # The Secrets Gradle plugin refuses to configure the project without local.properties.
+      - name: Write local.properties
+        if: steps.check.outputs.build == 'true'
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Set up signing
+        if: steps.check.outputs.build == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then echo "::error::SIGNING_KEYSTORE_BASE64 is not set"; exit 1; fi
+          mkdir -p app/keystores
+          echo "$KEYSTORE_BASE64" | base64 -d > app/keystores/signing.keystore
+          {
+            echo "storeFile=keystores/signing.keystore"
+            echo "storePassword=android"
+            echo "keyAlias=androiddebugkey"
+            echo "keyPassword=android"
+          } > app/keystores/keystore.properties
+
+      - name: Build
+        if: steps.check.outputs.build == 'true'
+        run: ./gradlew --no-daemon :app:assembleModernRelease
+
+      # An APK signed with the wrong key would be offered as an update that then fails to install.
+      - name: Verify the signature
+        if: steps.check.outputs.build == 'true'
+        run: |
+          apk=app/build/outputs/apk/modern/release/app-modern-release.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk" | tee certs.txt
+          if ! grep -qi "SHA-256 digest: $SIGNING_CERT_SHA256" certs.txt; then
+            echo "::error::APK isn't signed with the key the installed app was signed with"
+            exit 1
+          fi
+          cp "$apk" WoW-Forever.apk
+
+      - name: Remove signing files
+        if: always()
+        run: rm -rf app/keystores/signing.keystore app/keystores/keystore.properties
+
+      - name: Publish the release
+        if: steps.check.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.name }}
+          FORK: ${{ steps.merge.outputs.fork }}
+          UPSTREAM: ${{ steps.merge.outputs.upstream }}
+        run: |
+          {
+            echo "Latest changes in the original project:"
+            echo
+            git log --no-merges --format='- %s' -8 "$UPSTREAM"
+            echo
+            echo "Built from this fork at $FORK merged with the original at $UPSTREAM."
+          } > notes.md
+          gh release create "v$VERSION" WoW-Forever.apk \
+            --target "$FORK" \
+            --title "WoW Forever for Android v$VERSION" \
+            --notes-file notes.md \
+            --latest

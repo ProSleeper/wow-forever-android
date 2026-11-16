@@ -14,7 +14,9 @@ import org.json.JSONObject
 import timber.log.Timber
 
 object AppUpdater {
-    private const val RELEASES_URL = "https://api.github.com/repos/jaredgei/wow-forever-android/releases/latest"
+    // This fork's releases, not the original's: its builds are signed with another key, so they can't be installed
+    // over this one, and they don't carry this fork's changes.
+    private const val RELEASES_URL = "https://api.github.com/repos/ProSleeper/wow-forever-android/releases/latest"
 
     data class Release(
         val version: String,
