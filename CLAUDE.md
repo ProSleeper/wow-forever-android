@@ -1,0 +1,102 @@
+# 작업 인수인계 노트
+
+이 파일은 여러 PC에서 이 저장소를 이어서 작업하기 위한 기록이다. 세션을 시작하면 자동으로 읽힌다.
+공개 저장소이므로 계정, 비밀번호, 개인 정보는 적지 않는다.
+
+## 세션 규칙
+
+- 작업을 시작하기 전에 `git pull`로 최신 상태를 받는다.
+- 작업을 마치면 이 파일의 "현재 상태"와 관련 항목을 갱신해 함께 커밋한다.
+- 푸시는 사용자가 직접 한다. Claude가 실행한 `git push`는 인증 실패로 막힌 적이 있다.
+- 사용자에게 하는 설명은 한글로 한다.
+- 이 파일만 바뀐 커밋은 APK를 새로 빌드하지 않는다(아래 "자동 빌드" 참고).
+
+## 이 저장소가 무엇인가
+
+- 안드로이드에서 WoW Forever의 Windows ARM64 클라이언트를 Wine으로 실행하는 런처다.
+- 원본은 `jaredgei/wow-forever-android`, 이 저장소는 그 포크인 `ProSleeper/wow-forever-android`다.
+- 로컬 저장소에는 원본을 `upstream` 원격으로 등록해 쓴다. 없으면 추가한다:
+  `git remote add upstream https://github.com/jaredgei/wow-forever-android.git`
+
+## 원본과 다른 점
+
+포크의 `main`은 원본 `main` 위에 아래 커밋들을 얹은 것이다.
+
+1. **한글 등 비ASCII 입력과 터치용 키보드 버튼**
+   - 원본은 키보드에서 온 글자 중 ASCII만 게임에 보내 한글이 버려졌다.
+   - 키가 없는 문자는 안 쓰는 키코드(92~127 중 19개)에 유니코드 키심(0x01000000 + 코드포인트)을 걸어 누른다
+     (`XServer.injectUnicodeChar`, `Keyboard.nextSpareKeycode`). 이 앱의 Wine(winex11 `keyboard.c`)이 그 키심을
+     문자로 바꿔 준다.
+   - 키보드가 편집하는 줄을 그대로 두고, 바뀔 때마다 게임에 지우기와 다시 치기로 반영한다(`ImeTextMirror`).
+     그래서 조합 중인 글자(ㅎ → 하 → 한)도 바로 보인다.
+   - 화면 버튼 하나(`TypingAids.kt`): 짧게 누르면 키보드와 채팅창, 길게 누르면 키보드만, 키보드가 떠 있으면 닫기.
+   - 입력 중인 줄을 키보드 위에 보여 주고, 가로 화면에서 바닥에 붙는 키보드가 뜨면 게임 화면을 그 높이만큼
+     올린다(`liftedAboveKeyboard`).
+2. **자동 빌드와 업데이트 주소**
+   - `.github/workflows/sync-build.yml`과 `AppUpdater.kt`의 릴리스 주소(이 포크로 변경).
+
+원본이 2.3.4에서 지역별 클라이언트 빌드 문제를 직접 고쳤으므로, 그 부분은 원본 코드를 그대로 쓴다.
+
+## 자동 빌드
+
+- `sync-build.yml`이 2시간마다, 그리고 `main`에 푸시될 때마다 돈다.
+- 원본 `main`을 빌드용으로만 합친다. 합친 결과는 푸시하지 않는다. Actions의 기본 토큰은 워크플로 파일이 바뀐
+  커밋을 올릴 수 없는데, 원본이 가끔 그 파일을 고치기 때문이다.
+- 마지막 릴리스의 설명에 적힌 두 커밋(포크, 원본)과 지금이 같으면 건너뛴다. 포크 쪽은 "이 파일(`CLAUDE.md`)
+  외의 것을 마지막으로 바꾼 커밋"으로 따지므로 이 파일만 고친 커밋은 빌드를 일으키지 않는다.
+- 버전은 `원본버전.실행번호`(예: `2.4.3.2`), 버전 코드는 `원본코드 × 1000 + 실행번호`다.
+- 서명은 저장소 시크릿 `SIGNING_KEYSTORE_BASE64`의 키로 한다. 폰에 깔린 앱과 같은 키여야 덮어 설치된다.
+  인증서 SHA-256은 워크플로의 `SIGNING_CERT_SHA256`에 있고, 다르면 릴리스하지 않는다.
+- 결과는 포크의 Releases에 `WoW-Forever.apk`로 올라가고, 앱이 그곳에서 업데이트를 확인한다.
+- 실행 상태는 로그인 없이 볼 수 있다:
+  `https://api.github.com/repos/ProSleeper/wow-forever-android/actions/runs`,
+  `https://api.github.com/repos/ProSleeper/wow-forever-android/releases/latest`
+
+### 원본과 충돌이 났을 때
+
+워크플로의 "Merge the original's latest changes" 단계가 실패한다. 로컬에서 푼다.
+
+1. `git fetch upstream`
+2. `git merge upstream/main` 으로 합치고 충돌을 푼다.
+3. 커밋한 뒤 사용자가 푸시한다. 다음 실행부터 다시 돈다.
+
+## 로컬 빌드
+
+평소에는 GitHub가 빌드하므로 로컬 빌드는 급하게 확인할 때만 쓴다.
+
+- JDK 17 이상이 필요하다. Android Studio에 든 JBR을 `JAVA_HOME`으로 지정하면 된다.
+- `local.properties`에 `sdk.dir`이 있어야 한다(없으면 Gradle 설정 단계에서 실패한다).
+- `tools/fetch_components.sh`로 런타임 컴포넌트 4종을 받는다. 없으면 APK는 만들어지지만 실행 때 Proton을
+  못 찾아 멈춘다.
+- 디버그: `gradlew assembleModernDebug`, 릴리스: `gradlew assembleModernRelease`.
+  키스토어 설정이 없으면 둘 다 그 PC의 디버그 키로 서명된다.
+- 단위 테스트: `gradlew testModernDebugUnitTest --tests "app.gamenative.externaldisplay.*"` 등.
+
+## 알려진 함정
+
+- **Windows에서만 실패하는 테스트**: `WowMachineIdentityTest.applyTo_replacesTheSharedPrefixIdentity`.
+  `WineRegistryEditor`가 기존 파일 위로 `File.renameTo`를 하는데 Windows에서는 false가 돌아온다. 안드로이드와
+  리눅스에서는 정상이므로 무시한다.
+- **키를 붙여 보내면 게임이 놓친다**: 채팅창을 `/` 다음 백스페이스로 여는 방식은 실기기에서 백스페이스가
+  먹히지 않아 `/`가 남았다. 그래서 Enter로 열고, 키보드를 닫을 때 Esc로 닫는다. 연달아 보내는 키 사이에는
+  0.2초를 둔다(`IMEInputReceiver`의 `PAUSE`).
+- **예비 키코드는 127까지만**: 키코드를 부호 있는 바이트로 다뤄서 128 이상은 쓸 수 없다.
+- **"현재 사용 가능한 서버가 없습니다 (WOW51900309)"**: 클라이언트 빌드와 로그인 지역 서버의 빌드가 다를 때
+  나온다. 패치 서버의 지역별 줄과 게임 화면 왼쪽 아래의 빌드 번호를 비교하면 확인된다.
+- **시스템 키보드의 위치는 앱이 정할 수 없다**: 키보드 앱의 플로팅 모드를 쓰거나, 게임 화면을 올리는 방식으로
+  대신했다.
+- **입력창 포커스는 게임 밖에서 알 수 없다**: "입력창을 누르면 자동으로 키보드"는 그래서 만들지 못했다.
+
+## 현재 상태
+
+- 2026-11-16: 원본 v2.4.3까지 합쳤고, 자동 빌드로 첫 릴리스 `v2.4.3.2`가 나왔다. 사용자가 폰에 설치해
+  실행과 이후 자동 업데이트까지 확인했다.
+- 한글 입력, 키보드 버튼, 채팅창 열고 닫기는 사용자가 폰에서 써 보는 중이다. 사용자는 폰에서 화면 컨트롤
+  (가상 게임패드)로 플레이한다.
+
+## 남은 일
+
+- 새 릴리스가 나왔을 때 알림 받기: 방식 미정. 후보는 앱이 백그라운드에서 확인해 직접 알림을 띄우는 것,
+  GitHub의 릴리스 이메일 알림.
+- 한국어 기기에서 앱 이름이 "GameNative"로 표시되는 문제(`values-ko/strings.xml`의 `app_name`)는 원본에도
+  그대로 남아 있다.
