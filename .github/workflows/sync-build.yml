@@ -159,14 +159,42 @@ jobs:
           VERSION: ${{ steps.version.outputs.name }}
           FORK: ${{ steps.merge.outputs.fork }}
           UPSTREAM: ${{ steps.merge.outputs.upstream }}
+        # The notes list the original's latest commits in Korean and English. The Korean comes from MyMemory's free
+        # translation API, which needs no account. A line it can't translate is left in English only, so a failed or
+        # rate-limited lookup never holds up a release. The last line names both commits: the check above reads it.
         run: |
-          {
-            echo "Latest changes in the original project:"
-            echo
-            git log --no-merges --format='- %s' -8 "$UPSTREAM"
-            echo
-            echo "Built from this fork at $FORK merged with the original at $UPSTREAM."
-          } > notes.md
+          git log --no-merges --format='%s' -8 "$UPSTREAM" > changes.txt
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+
+          def korean(text):
+              query = urllib.parse.urlencode({"q": text, "langpair": "en|ko"})
+              try:
+                  with urllib.request.urlopen("https://api.mymemory.translated.net/get?" + query, timeout=15) as response:
+                      data = json.load(response)
+              except Exception as error:
+                  print(f"No translation for {text!r}: {error}")
+                  return None
+              translated = (data.get("responseData") or {}).get("translatedText") or ""
+              if data.get("responseStatus") != 200 or not translated or "MYMEMORY" in translated.upper():
+                  print(f"No translation for {text!r}: {data.get('responseDetails')}")
+                  return None
+              return translated if translated != text else None
+
+          lines = ["### 원본 프로젝트의 최근 변경 사항 · Latest changes in the original project", ""]
+          for change in open("changes.txt", encoding="utf-8").read().splitlines():
+              ko = korean(change)
+              # Two trailing spaces break the line on GitHub; the app shows each line as it is.
+              lines += [f"- {ko}  ", f"  {change}"] if ko else [f"- {change}"]
+          fork, upstream = os.environ["FORK"], os.environ["UPSTREAM"]
+          lines += [
+              "",
+              f"이 포크의 `{fork[:7]}`에 원본의 `{upstream[:7]}`을 합쳐 빌드했습니다.",
+              f"Built from this fork at {fork} merged with the original at {upstream}.",
+          ]
+          open("notes.md", "w", encoding="utf-8").write("\n".join(lines) + "\n")
+          PY
+          cat notes.md
           gh release create "v$VERSION" WoW-Forever.apk \
             --target "$FORK" \
             --title "WoW Forever for Android v$VERSION" \

@@ -48,6 +48,10 @@
 - 서명은 저장소 시크릿 `SIGNING_KEYSTORE_BASE64`의 키로 한다. 폰에 깔린 앱과 같은 키여야 덮어 설치된다.
   인증서 SHA-256은 워크플로의 `SIGNING_CERT_SHA256`에 있고, 다르면 릴리스하지 않는다.
 - 결과는 포크의 Releases에 `WoW-Forever.apk`로 올라가고, 앱이 그곳에서 업데이트를 확인한다.
+- 릴리스 노트는 한글과 영어를 함께 적는다(사용자 요청). 원본 커밋 제목은 MyMemory 무료 번역 API로 한글을
+  붙이고, 번역이 안 되면 그 줄만 영어로 둔다. 노트의 마지막 줄(`Built from this fork at ...`)은 위의 "이미
+  릴리스됐는지" 확인에 쓰이므로 형식을 바꾸지 않는다.
+- GitHub Models 추론 API는 쓸 수 없다: 2026-11 기준 인증 없이도 200 "OK"만 돌려준다(폐지된 것으로 보인다).
 - 실행 상태는 로그인 없이 볼 수 있다:
   `https://api.github.com/repos/ProSleeper/wow-forever-android/actions/runs`,
   `https://api.github.com/repos/ProSleeper/wow-forever-android/releases/latest`
