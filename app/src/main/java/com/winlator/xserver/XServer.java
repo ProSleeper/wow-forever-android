@@ -285,6 +285,13 @@ public class XServer {
         }
     }
 
+    /** As injectKeyPress, telling X what the key types without (keysym) and with Shift (shiftedKeysym). */
+    public void injectKeyPress(XKeycode xKeycode, int keysym, int shiftedKeysym, boolean autoRepeat) {
+        try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
+            keyboard.setKeyPress(xKeycode.getId(), keysym, shiftedKeysym, autoRepeat);
+        }
+    }
+
     public void injectKeyRelease(XKeycode xKeycode) {
         try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
             keyboard.setKeyRelease(xKeycode.getId());
@@ -292,15 +299,17 @@ public class XServer {
     }
 
     /**
-     * Types a character that has no key of its own (Hangul, for one) by pointing a spare keycode at it for the
-     * keystroke. Returns false for a character the keyboard mapping can't carry.
+     * Types a character that has no key of its own (Hangul or Cyrillic, for two) by pointing a spare keycode at it for
+     * the keystroke. Returns false for a character the keyboard mapping can't carry. The original project sends these
+     * through keycode 93 alone (#43); this fork takes the spare keycodes in turn instead, so that quick typing and the
+     * retyping of a composing Hangul syllable don't overwrite a character before Wine has read it.
      */
     public boolean injectUnicodeChar(int codePoint) {
         int keysym = UnicodeKeysym.unicodeKeysym(codePoint);
         if (keysym == 0) return false;
         try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
             byte keycode = keyboard.nextSpareKeycode();
-            keyboard.setKeyPress(keycode, keysym);
+            keyboard.setKeyPress(keycode, keysym, false);
             keyboard.setKeyRelease(keycode);
         }
         return true;

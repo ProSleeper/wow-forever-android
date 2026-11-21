@@ -13,6 +13,13 @@ class UnicodeKeysymTest {
     }
 
     @Test
+    fun cyrillicCharacters_useTheUnicodeKeysymRange() {
+        // The characters the original project's #43 is about.
+        assertEquals(0x01000444, unicodeKeysym('ф'.code))
+        assertEquals(0x0100041F, unicodeKeysym('П'.code))
+    }
+
+    @Test
     fun latin1Characters_keepTheirOwnKeysyms() {
         assertEquals(0xE9, unicodeKeysym('é'.code))
         assertEquals(0xA0, unicodeKeysym(0xA0))
