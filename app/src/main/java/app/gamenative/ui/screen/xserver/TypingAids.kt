@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -127,14 +128,37 @@ private fun BoxScope.TypedLine(line: String, hidden: Boolean, keyboardHeight: In
  * nearly always for. Holding the button brings up the keyboard alone, for a login or a search field, where the Enter
  * that closes the chat box afterwards would submit the field instead. With the keyboard up, a tap puts it away.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TypingButton(keyboardShown: Boolean, onOpenChat: () -> Unit, onShowKeyboard: () -> Unit, onHideKeyboard: () -> Unit) {
+    FloatingButton(
+        keyX = KEY_BUTTON_X,
+        keyY = KEY_BUTTON_Y,
+        defaultPlace = Offset(0.62f, 0.02f),
+        icon = if (keyboardShown) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
+        contentDescription = "Keyboard",
+        onClick = if (keyboardShown) onHideKeyboard else onOpenChat,
+        onLongClick = if (keyboardShown) null else onShowKeyboard,
+    )
+}
+
+/**
+ * A round button drawn over the game that can be dragged out of the way. Its place is kept, under keyX and keyY, as a
+ * fraction of the free space, so it holds across screen sizes and rotations.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun FloatingButton(
+    keyX: String,
+    keyY: String,
+    defaultPlace: Offset,
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
-    // The button can be dragged out of the way. Its place is kept as a fraction of the free space, so it holds across
-    // screen sizes and rotations.
-    var place by remember { mutableStateOf(Offset(prefs.getFloat(KEY_BUTTON_X, 0.62f), prefs.getFloat(KEY_BUTTON_Y, 0.02f))) }
+    var place by remember { mutableStateOf(Offset(prefs.getFloat(keyX, defaultPlace.x), prefs.getFloat(keyY, defaultPlace.y))) }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val buttonPx = with(LocalDensity.current) { BUTTON_SIZE.toPx() }
@@ -153,7 +177,7 @@ private fun TypingButton(keyboardShown: Boolean, onOpenChat: () -> Unit, onShowK
                 .pointerInput(free) {
                     detectDragGestures(
                         onDragEnd = {
-                            prefs.edit().putFloat(KEY_BUTTON_X, place.x).putFloat(KEY_BUTTON_Y, place.y).apply()
+                            prefs.edit().putFloat(keyX, place.x).putFloat(keyY, place.y).apply()
                         },
                     ) { change, drag ->
                         change.consume()
@@ -163,14 +187,11 @@ private fun TypingButton(keyboardShown: Boolean, onOpenChat: () -> Unit, onShowK
                         )
                     }
                 }
-                .combinedClickable(
-                    onClick = if (keyboardShown) onHideKeyboard else onOpenChat,
-                    onLongClick = if (keyboardShown) null else onShowKeyboard,
-                ),
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         ) {
             Icon(
-                imageVector = if (keyboardShown) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
-                contentDescription = "Keyboard",
+                imageVector = icon,
+                contentDescription = contentDescription,
                 tint = Color.White.copy(alpha = 0.85f),
                 modifier = Modifier.size(24.dp),
             )

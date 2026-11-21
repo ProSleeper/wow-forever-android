@@ -563,6 +563,7 @@ fun XServerScreen(
     var keyboardRequestedFromOverlay by remember { mutableStateOf(false) }
     // The line being typed on the Android keyboard, shown on screen because the keyboard covers the game's own field.
     var typedLine by remember { mutableStateOf("") }
+    val screenLock = remember { ScreenLock() }
     var shouldForceResumeOnMenuClose by remember { mutableStateOf(false) }
     var showQuickMenu by remember { mutableStateOf(false) }
     // Some ROMs (e.g. RedMagic) deliver one back gesture both as KEYCODE_BACK and through OnBackInvokedCallback,
@@ -1373,6 +1374,12 @@ fun XServerScreen(
     }
 
     val gameBack: () -> Unit = gameBack@{
+        // A locked screen ignores back as it does touches, only pointing at the way to unlock it.
+        if (screenLock.locked) {
+            screenLock.showUnlockButton()
+            return@gameBack
+        }
+
         val imeVisible = ViewCompat.getRootWindowInsets(view)
             ?.isVisible(WindowInsetsCompat.Type.ime()) == true
 
@@ -2711,15 +2718,24 @@ fun XServerScreen(
             )
         }
 
-        // The typing buttons belong to touch play, so they come and go with the on-screen controls.
+        // The typing and lock buttons belong to touch play, so they come and go with the on-screen controls.
+        val showTouchButtons = areControlsVisible && !isEditMode && !showQuickMenu && !screenLock.locked
         TypingAids(
-            showButtons = areControlsVisible && !isEditMode && !showQuickMenu,
+            showButtons = showTouchButtons,
             line = typedLine,
             onOpenChat = { imeInputReceiver?.openChat() },
             onShowKeyboard = { imeInputReceiver?.showKeyboard() },
             onHideKeyboard = { imeInputReceiver?.hideKeyboard() },
             onKeyboardGone = { imeInputReceiver?.onKeyboardGone() },
         )
+        if (showTouchButtons) {
+            LockButton(
+                onLock = {
+                    imeInputReceiver?.hideKeyboard()
+                    screenLock.lock()
+                },
+            )
+        }
 
         QuickMenu(
             isVisible = showQuickMenu,
@@ -2802,6 +2818,9 @@ fun XServerScreen(
         if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu && !keepPausedForEditor) {
             ManualResumeOverlay(onResume = ::resumeFromManualButton)
         }
+
+        // Last, so that it lies over everything above.
+        ScreenLockOverlay(screenLock)
     }
 
     // Element Editor Dialog
