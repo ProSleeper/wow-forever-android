@@ -171,6 +171,8 @@ public class ALSAClient {
         } else if (dataType == DataType.S16BE || dataType == DataType.FLOATBE) {
             data.order(ByteOrder.BIG_ENDIAN);
         }
+        // MotionTap listens for the fishing splash here, before AudioTrack and Android's volume.
+        GameAudioTap.offer(data, dataType, this.channels, this.sampleRate);
         if (this.audioTrack != null) {
             data.position(0);
             do {

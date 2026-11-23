@@ -44,7 +44,17 @@
    - 원래 이 자리에는 화면 전체를 막는 잠금(`ScreenLock.kt`, `6eba362`)이 있었는데, 사용자가 "전부 막혀
      불편하다"고 해서 2026-11-23에 이것으로 바꿨다. 버튼 위치 저장 키(`lock_button_x/y`)는 그대로 이어 쓴다.
      전체 잠금이 다시 필요하면 `6eba362`의 `ScreenLock.kt`를 참고해 별도 버튼으로 되살리면 된다.
-3. **자동 빌드와 업데이트 주소**
+3. **MotionTap 소리 넘기기**(`MotionTapSound.kt`, `com/winlator/alsaserver/GameAudioTap.java`)
+   - MotionTap(같은 폰의 낚시 보조 앱)이 찌 첨벙 소리를 폰 볼륨과 상관없이 듣게 한다. 원본 기본(PulseAudio)은
+     게임 소리를 AAudio MMAP으로 바로 내보내서 다른 앱이 아예 들을 수 없다(AudioPlaybackCapture에 무음).
+   - 런처 버튼 "MotionTap sound: On/Off"(기본 Off). 켜면 WoW 컨테이너의 `audioDriver`가 `alsa`가 된다(다음 실행부터).
+     ALSA 경로는 게임 PCM이 `ALSAClient.writeDataToTrack`을 지나 AudioTrack으로 가므로, 거기서 AudioTrack·안드로이드
+     볼륨 전의 소리를 복사한다.
+   - `127.0.0.1:47621` TCP로 붙은 쪽이 있을 때만 모노 16비트 꾸러미(빅엔디언 int "MTA1", 표본율, 표본 수, short[])를
+     보낸다. 오디오 스레드는 막지 않는다(큐 64개, 밀리면 버림). 받는 쪽은 MotionTap 저장소의 `WfaAudio.kt`.
+   - PulseAudio 묶음에는 모듈이 4개뿐(simple-protocol 등 없음)이라 PulseAudio 쪽에서 빼낼 수는 없었다.
+   - 원본의 `ALSAClient.writeDataToTrack`이 바뀌면 그 한 줄(`GameAudioTap.offer`)에서 충돌할 수 있다.
+4. **자동 빌드와 업데이트 주소**
    - `.github/workflows/sync-build.yml`과 `AppUpdater.kt`의 릴리스 주소(이 포크로 변경).
 
 원본이 2.3.4에서 지역별 클라이언트 빌드 문제를 직접 고쳤으므로, 그 부분은 원본 코드를 그대로 쓴다.
@@ -121,6 +131,9 @@
 - 2026-11-21: 화면 잠금을 추가했다. 컴파일과 단위 테스트까지만 확인했고, 폰에서는 아직 써 보지 않았다.
 - 2026-11-23: 가장자리 스와이프 보호를 추가했다. 사용자가 폰에서 써 보고 쓸어내리기·올리기 간섭이 많이 줄었다고
   확인했다. 다만 아래에 붙은 화면 컨트롤이 잘 안 눌려서, 화면 잠금 버튼을 이 기능의 켜기·끄기 버튼으로 바꿨다.
+
+- 2026-11-23: MotionTap 소리 넘기기를 추가했다. 단위 테스트(`GameAudioTapTest` 3개)와 빌드까지만
+  확인했다. 폰에서 ALSA 드라이버로 게임 소리가 정상인지(끊김·지연), MotionTap에 소리가 가는지는 아직 확인 안 함.
 
 ## 남은 일
 

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -106,6 +107,7 @@ fun WoWForeverScreen(
     var launchJob by remember { mutableStateOf<Job?>(null) }
     var hasSavedLogin by remember { mutableStateOf(BattleNetSignIn.load(context) != null) }
     var browserLogin by remember { mutableStateOf(BattleNetBrowserLogin.enabled(context)) }
+    var motionTapSound by remember { mutableStateOf(MotionTapSound.enabled(context)) }
     var region by remember(gamePath, files) { mutableStateOf(GameRegion.current(context, gamePath)) }
     var resolution by remember { mutableStateOf(RenderResolution.current(context, gpu.screenSize)) }
     var showLoginDialog by remember { mutableStateOf(false) }
@@ -722,6 +724,17 @@ fun WoWForeverScreen(
                             browserLogin = !browserLogin
                             BattleNetBrowserLogin.setEnabled(context, browserLogin)
                         }
+                        LinkButton(
+                            text = if (motionTapSound) "MotionTap sound: On" else "MotionTap sound: Off",
+                            icon = Icons.Default.VolumeUp,
+                        ) {
+                            motionTapSound = !motionTapSound
+                            MotionTapSound.setEnabled(context, motionTapSound)
+                            SnackbarManager.show(
+                                if (motionTapSound) "Game sound goes to MotionTap from the next launch (ALSA audio)."
+                                else "Back to PulseAudio from the next launch.",
+                            )
+                        }
                         // With browser login on, this also signs out of the Battle.net page so another account
                         // can sign in next time.
                         if (hasSavedLogin || browserLogin) {
@@ -1268,7 +1281,7 @@ private fun prepareLaunch(context: Context, gameRoot: File, gpu: GpuProfile, scr
 
     onStatus("Configuring ${gpu.label} container...")
     val containerManager = ContainerManager(context)
-    val config = containerConfig(gameRoot, gpu, screenSize, WowMachineIdentity.load(context))
+    val config = containerConfig(gameRoot, gpu, screenSize, WowMachineIdentity.load(context), MotionTapSound.audioDriver(context))
     val container = containerManager.getContainerById(CONTAINER_ID)
     if (container == null) {
         onStatus("Creating prefix environment (first boot)...")
@@ -1291,7 +1304,7 @@ private fun prepareLaunch(context: Context, gameRoot: File, gpu: GpuProfile, scr
     return CONTAINER_ID
 }
 
-private fun containerConfig(gameRoot: File, gpu: GpuProfile, screenSize: String, identity: WowMachineIdentity): JSONObject {
+private fun containerConfig(gameRoot: File, gpu: GpuProfile, screenSize: String, identity: WowMachineIdentity, audioDriver: String): JSONObject {
     val samsungEnv = if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) " FD_DEV_FEATURES=enable_tp_ubwc_flag_hint=1" else ""
     val envVars = "WRAPPER_MAX_IMAGE_COUNT=0 ZINK_DESCRIPTORS=lazy ZINK_DEBUG=compact,deck_emu MESA_SHADER_CACHE_DISABLE=false MESA_SHADER_CACHE_MAX_SIZE=512MB mesa_glthread=true WINEESYNC=0 MESA_VK_WSI_PRESENT_MODE=mailbox TU_DEBUG=${gpu.tuDebug} VKD3D_SHADER_MODEL=6_0 PULSE_LATENCY_MSEC=144 ${WowMachineIdentity.HOSTNAME_ENV}=${identity.computerName}$samsungEnv"
     return JSONObject().apply {
@@ -1312,6 +1325,8 @@ private fun containerConfig(gameRoot: File, gpu: GpuProfile, screenSize: String,
         put("executablePath", "G:\\$FLAVOR_DIR\\$EXE_NAME")
         put("execArgs", "-d3d11")
         put("showFPS", true)
+        // "alsa" while MotionTap sound is on (see MotionTapSound), otherwise the default PulseAudio.
+        put("audioDriver", audioDriver)
         // Keep running in the background: a suspended client drops its Battle.net connection, e.g. while the
         // player fetches an authenticator code from another app.
         put("suspendPolicy", Container.SUSPEND_POLICY_NEVER)
