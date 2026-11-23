@@ -898,7 +898,7 @@ fun WoWForeverScreen(
                         }
                     }
                 },
-                // LATER and UPDATE NOW side by side, with "Don't Show Today" under them as wide as the two together.
+                // LATER and UPDATE NOW side by side, with "Remind Me Tomorrow" under them as wide as the two together.
                 confirmButton = {
                     Column(
                         modifier = Modifier.width(IntrinsicSize.Max),
@@ -936,7 +936,7 @@ fun WoWForeverScreen(
                                 modifier = Modifier.fillMaxWidth().height(ButtonDefaults.MinHeight),
                                 shape = RoundedCornerShape(10.dp),
                             ) {
-                                Text("Don't Show Today", color = WowMuted)
+                                Text("Remind Me Tomorrow", color = WowMuted)
                             }
                         }
                     }
