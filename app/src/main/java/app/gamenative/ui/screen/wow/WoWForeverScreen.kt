@@ -130,7 +130,8 @@ fun WoWForeverScreen(
     suspend fun fetchAppUpdate(): AppUpdater.Release? {
         val release = AppUpdater.check()
         appUpdate = release
-        if (release != null) {
+        // The launcher's update card stays either way; only the pop-up waits out a "Not today".
+        if (release != null && !AppUpdater.isSnoozed(context, release.version)) {
             showAppUpdateDialog = true
         }
         return release
@@ -405,7 +406,8 @@ fun WoWForeverScreen(
                 val update = updateJob.await()
                 Timber.i("WoWForeverScreen LaunchedEffect: isOutdated=${versionStatus?.isOutdated}, appUpdate=$update")
                 WoWLauncherState.shouldAutoLaunch = false
-                if (versionStatus?.isOutdated == true || update != null) {
+                // An app update put off with "Not today" doesn't hold up the game.
+                if (versionStatus?.isOutdated == true || (update != null && !AppUpdater.isSnoozed(context, update.version))) {
                     PluviaApp.events.emit(AndroidEvent.ClearBootingSplash)
                 } else {
                     launchGame()
@@ -915,8 +917,17 @@ fun WoWForeverScreen(
                 },
                 dismissButton = {
                     if (!isDownloadingAppUpdate) {
-                        TextButton(onClick = { showAppUpdateDialog = false }) {
-                            Text("LATER", color = WowMuted)
+                        Row {
+                            // Puts this version's pop-up off for a day. A newer release still shows at once.
+                            TextButton(onClick = {
+                                AppUpdater.snooze(context, update.version)
+                                showAppUpdateDialog = false
+                            }) {
+                                Text("NOT TODAY", color = WowMuted)
+                            }
+                            TextButton(onClick = { showAppUpdateDialog = false }) {
+                                Text("LATER", color = WowMuted)
+                            }
                         }
                     }
                 },

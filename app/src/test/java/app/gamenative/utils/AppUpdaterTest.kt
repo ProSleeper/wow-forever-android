@@ -10,6 +10,22 @@ import org.junit.Test
 class AppUpdaterTest {
 
     @Test
+    fun isSnoozed_sameVersionWithinADay() {
+        val day = AppUpdater.SNOOZE_MS
+        assertTrue(AppUpdater.isSnoozed("2.4.6.29", 1_000L, "2.4.6.29", 1_000L))
+        assertTrue(AppUpdater.isSnoozed("2.4.6.29", 1_000L, "2.4.6.29", 1_000L + day - 1))
+        assertFalse(AppUpdater.isSnoozed("2.4.6.29", 1_000L, "2.4.6.29", 1_000L + day))
+    }
+
+    @Test
+    fun isSnoozed_neverForANewerVersionOrWithoutASnooze() {
+        assertFalse(AppUpdater.isSnoozed("2.4.6.29", 1_000L, "2.4.6.30", 2_000L))
+        assertFalse(AppUpdater.isSnoozed(null, 0L, "2.4.6.29", 2_000L))
+        // A clock set back before the snooze doesn't stretch it out.
+        assertFalse(AppUpdater.isSnoozed("2.4.6.29", 5_000L, "2.4.6.29", 1_000L))
+    }
+
+    @Test
     fun isNewer_higherPatch_returnsTrue() {
         assertTrue(AppUpdater.isNewer("v2.1.3", "2.1.2"))
     }

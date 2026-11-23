@@ -18,6 +18,31 @@ object AppUpdater {
     // over this one, and they don't carry this fork's changes.
     private const val RELEASES_URL = "https://api.github.com/repos/ProSleeper/wow-forever-android/releases/latest"
 
+    private const val PREFS = "app_update"
+    private const val KEY_SNOOZED_VERSION = "snoozed_version"
+    private const val KEY_SNOOZED_AT = "snoozed_at"
+    const val SNOOZE_MS = 24 * 60 * 60 * 1000L
+
+    /**
+     * Whether the update prompt for [version] was put off with "Not today" less than a day ago. A newer release than
+     * the one put off is always shown.
+     */
+    fun isSnoozed(snoozedVersion: String?, snoozedAt: Long, version: String, now: Long): Boolean =
+        snoozedVersion == version && now - snoozedAt in 0 until SNOOZE_MS
+
+    fun isSnoozed(context: Context, version: String, now: Long = System.currentTimeMillis()): Boolean {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return isSnoozed(prefs.getString(KEY_SNOOZED_VERSION, null), prefs.getLong(KEY_SNOOZED_AT, 0L), version, now)
+    }
+
+    /** Stops the update prompt for [version] for a day. */
+    fun snooze(context: Context, version: String, now: Long = System.currentTimeMillis()) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_SNOOZED_VERSION, version)
+            .putLong(KEY_SNOOZED_AT, now)
+            .apply()
+    }
+
     data class Release(
         val version: String,
         val name: String,
