@@ -2613,6 +2613,9 @@ fun XServerScreen(
     )
         }
 
+        // Over the game but under every button drawn on it, so those stay usable all the way to the edge.
+        EdgeSwipeGuard()
+
         // Click highlight overlay (gesture overhaul)
         if (currentGestureConfig.showClickHighlight && clickHighlightPoints.isNotEmpty()) {
             app.gamenative.ui.component.ClickHighlightOverlay(points = clickHighlightPoints)
