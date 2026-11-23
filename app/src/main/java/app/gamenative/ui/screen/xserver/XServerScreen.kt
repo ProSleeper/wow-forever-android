@@ -3766,8 +3766,6 @@ private fun setupXEnvironment(
         envVars.put("ANDROID_ASERVER_USE_SHM", "true")
         val options = ALSAClient.Options.fromKeyValueSet(null)
         environment.addComponent(ALSAServerComponent(UnixSocketConfig.createSocket(imageFs.getRootDir().getPath(), UnixSocketConfig.ALSA_SERVER_PATH), options))
-        // Lets MotionTap hear the game before Android's volume (copies nothing until it connects).
-        com.winlator.alsaserver.GameAudioTap.start()
         if (micEnabled) {
             // Playback stays on the ALSA server; run PulseAudio in mic-only mode (no AAudio sink, so
             // no extra output path and no added playback latency) purely to expose the capture device.
