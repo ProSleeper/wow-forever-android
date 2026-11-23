@@ -898,35 +898,45 @@ fun WoWForeverScreen(
                         }
                     }
                 },
+                // LATER and UPDATE NOW side by side, with "Don't Show Today" under them as wide as the two together.
                 confirmButton = {
-                    Button(
-                        onClick = ::performAppUpdate,
-                        enabled = !isDownloadingAppUpdate,
-                        colors = ButtonDefaults.buttonColors(containerColor = WowBronze, contentColor = Color.White),
-                        shape = RoundedCornerShape(10.dp),
+                    Column(
+                        modifier = Modifier.width(IntrinsicSize.Max),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            text = when {
-                                isDownloadingAppUpdate -> "DOWNLOADING..."
-                                downloadedApk?.exists() == true -> "INSTALL NOW"
-                                else -> "UPDATE NOW"
-                            },
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                },
-                dismissButton = {
-                    if (!isDownloadingAppUpdate) {
-                        Row {
-                            // Puts this version's pop-up off for a day. A newer release still shows at once.
-                            TextButton(onClick = {
-                                AppUpdater.snooze(context, update.version)
-                                showAppUpdateDialog = false
-                            }) {
-                                Text("NOT TODAY", color = WowMuted)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (!isDownloadingAppUpdate) {
+                                TextButton(onClick = { showAppUpdateDialog = false }) {
+                                    Text("LATER", color = WowMuted)
+                                }
                             }
-                            TextButton(onClick = { showAppUpdateDialog = false }) {
-                                Text("LATER", color = WowMuted)
+                            Button(
+                                onClick = ::performAppUpdate,
+                                enabled = !isDownloadingAppUpdate,
+                                colors = ButtonDefaults.buttonColors(containerColor = WowBronze, contentColor = Color.White),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text(
+                                    text = when {
+                                        isDownloadingAppUpdate -> "DOWNLOADING..."
+                                        downloadedApk?.exists() == true -> "INSTALL NOW"
+                                        else -> "UPDATE NOW"
+                                    },
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                        if (!isDownloadingAppUpdate) {
+                            // Puts this version's pop-up off for a day. A newer release still shows at once.
+                            OutlinedButton(
+                                onClick = {
+                                    AppUpdater.snooze(context, update.version)
+                                    showAppUpdateDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth().height(ButtonDefaults.MinHeight),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text("Don't Show Today", color = WowMuted)
                             }
                         }
                     }
