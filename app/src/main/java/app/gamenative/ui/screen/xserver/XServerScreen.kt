@@ -563,7 +563,7 @@ fun XServerScreen(
     var keyboardRequestedFromOverlay by remember { mutableStateOf(false) }
     // The line being typed on the Android keyboard, shown on screen because the keyboard covers the game's own field.
     var typedLine by remember { mutableStateOf("") }
-    val screenLock = remember { ScreenLock() }
+    val edgeGuard = rememberEdgeGuardSetting()
     var shouldForceResumeOnMenuClose by remember { mutableStateOf(false) }
     var showQuickMenu by remember { mutableStateOf(false) }
     // Some ROMs (e.g. RedMagic) deliver one back gesture both as KEYCODE_BACK and through OnBackInvokedCallback,
@@ -1374,12 +1374,6 @@ fun XServerScreen(
     }
 
     val gameBack: () -> Unit = gameBack@{
-        // A locked screen ignores back as it does touches, only pointing at the way to unlock it.
-        if (screenLock.locked) {
-            screenLock.showUnlockButton()
-            return@gameBack
-        }
-
         val imeVisible = ViewCompat.getRootWindowInsets(view)
             ?.isVisible(WindowInsetsCompat.Type.ime()) == true
 
@@ -2614,7 +2608,7 @@ fun XServerScreen(
         }
 
         // Over the game but under every button drawn on it, so those stay usable all the way to the edge.
-        EdgeSwipeGuard()
+        EdgeSwipeGuard(enabled = edgeGuard.enabled)
 
         // Click highlight overlay (gesture overhaul)
         if (currentGestureConfig.showClickHighlight && clickHighlightPoints.isNotEmpty()) {
@@ -2721,8 +2715,8 @@ fun XServerScreen(
             )
         }
 
-        // The typing and lock buttons belong to touch play, so they come and go with the on-screen controls.
-        val showTouchButtons = areControlsVisible && !isEditMode && !showQuickMenu && !screenLock.locked
+        // The typing and edge guard buttons belong to touch play, so they come and go with the on-screen controls.
+        val showTouchButtons = areControlsVisible && !isEditMode && !showQuickMenu
         TypingAids(
             showButtons = showTouchButtons,
             line = typedLine,
@@ -2732,12 +2726,7 @@ fun XServerScreen(
             onKeyboardGone = { imeInputReceiver?.onKeyboardGone() },
         )
         if (showTouchButtons) {
-            LockButton(
-                onLock = {
-                    imeInputReceiver?.hideKeyboard()
-                    screenLock.lock()
-                },
-            )
+            EdgeGuardButton(edgeGuard)
         }
 
         QuickMenu(
@@ -2821,9 +2810,6 @@ fun XServerScreen(
         if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu && !keepPausedForEditor) {
             ManualResumeOverlay(onResume = ::resumeFromManualButton)
         }
-
-        // Last, so that it lies over everything above.
-        ScreenLockOverlay(screenLock)
     }
 
     // Element Editor Dialog
@@ -3780,6 +3766,8 @@ private fun setupXEnvironment(
         envVars.put("ANDROID_ASERVER_USE_SHM", "true")
         val options = ALSAClient.Options.fromKeyValueSet(null)
         environment.addComponent(ALSAServerComponent(UnixSocketConfig.createSocket(imageFs.getRootDir().getPath(), UnixSocketConfig.ALSA_SERVER_PATH), options))
+        // Lets MotionTap hear the game before Android's volume (copies nothing until it connects).
+        com.winlator.alsaserver.GameAudioTap.start()
         if (micEnabled) {
             // Playback stays on the ALSA server; run PulseAudio in mic-only mode (no AAudio sink, so
             // no extra output path and no added playback latency) purely to expose the capture device.
