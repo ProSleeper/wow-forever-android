@@ -2721,6 +2721,7 @@ fun XServerScreen(
         TypingAids(
             showButtons = showTouchButtons,
             line = typedLine,
+            onOpenChat = { imeInputReceiver?.openChat() },
             onShowKeyboard = { imeInputReceiver?.showKeyboard() },
             onHideKeyboard = { imeInputReceiver?.hideKeyboard() },
             onKeyboardGone = { imeInputReceiver?.onKeyboardGone() },
