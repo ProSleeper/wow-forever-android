@@ -328,10 +328,11 @@ fun WoWForeverScreen(
         onDispose { view.keepScreenOn = false }
     }
 
-    // Progress shows under the cards, which is below the fold on a landscape handheld.
+    // Progress shows under the title, so the screen goes back to the top to show it.
     val scrollState = rememberScrollState()
+    val isBusy = isLaunching || isUpdating || (isCheckingVersion && WoWLauncherState.shouldAutoLaunch)
     LaunchedEffect(isUpdating, isLaunching) {
-        if (isUpdating || isLaunching) scrollState.animateScrollTo(scrollState.maxValue)
+        if (isUpdating || isLaunching) scrollState.animateScrollTo(0)
     }
 
     fun downloadGameFiles(failure: String, work: (File, (String) -> Unit) -> Unit, onSuccess: () -> Unit) {
@@ -448,6 +449,80 @@ fun WoWForeverScreen(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(text = "${gpu.edition} Edition", fontSize = 11.sp, color = WowSubtle)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // The main action sits right under the title, so it's there without scrolling past the cards (user request,
+            // 2026-11-25). Progress shows in its place while the game launches or updates.
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (isBusy) {
+                    CircularProgressIndicator(color = WowGold, modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = when {
+                            isUpdating -> updateStatusText
+                            isLaunching -> statusText
+                            else -> "Checking for game updates..."
+                        },
+                        fontSize = 13.sp,
+                        color = Color(0xFFE2E8F0),
+                        textAlign = TextAlign.Center
+                    )
+                } else {
+                    when {
+                        !files.hasStorageAccess -> PrimaryButton(
+                            text = "GRANT STORAGE PERMISSION",
+                            icon = Icons.Default.FolderOpen,
+                            enabled = !isLaunching && !isUpdating,
+                            onClick = { StorageUtils.requestManageExternalStoragePermission(context) },
+                        )
+                        files.needsInstall -> {
+                            PrimaryButton(
+                                text = if (files.isLegacyBeta) "UPGRADE TO FULL RELEASE" else "DOWNLOAD & INSTALL",
+                                icon = Icons.Default.Download,
+                                enabled = !isLaunching && !isUpdating,
+                                onClick = ::performInstall,
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedButton(
+                                onClick = { folderPicker.launch(null) },
+                                modifier = Modifier.fillMaxWidth(0.85f).height(48.dp),
+                                shape = RoundedCornerShape(14.dp),
+                            ) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp), tint = WowGold)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("LOCATE EXISTING FILES", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WowGold)
+                            }
+                        }
+                        versionStatus?.isOutdated == true -> {
+                            PrimaryButton(
+                                text = "UPDATE TO ${versionStatus?.remoteVersion}",
+                                icon = Icons.Default.Refresh,
+                                enabled = canPlay,
+                                onClick = ::performUpdate,
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedButton(
+                                onClick = ::launchGame,
+                                enabled = canPlay,
+                                modifier = Modifier.fillMaxWidth(0.85f).height(48.dp),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text(text = "LAUNCH ANYWAY (OUTDATED)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WowError)
+                            }
+                        }
+                        else -> PrimaryButton(
+                            text = if (files.isWrongGame) "WOW FOREVER REQUIRED" else "PLAY WORLD OF WARCRAFT",
+                            icon = Icons.Default.PlayArrow,
+                            enabled = canPlay,
+                            onClick = ::launchGame,
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -626,76 +701,11 @@ fun WoWForeverScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                if (isLaunching || isUpdating || (isCheckingVersion && WoWLauncherState.shouldAutoLaunch)) {
-                    CircularProgressIndicator(color = WowGold, modifier = Modifier.size(36.dp))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = when {
-                            isUpdating -> updateStatusText
-                            isLaunching -> statusText
-                            else -> "Checking for game updates..."
-                        },
-                        fontSize = 13.sp,
-                        color = Color(0xFFE2E8F0),
-                        textAlign = TextAlign.Center
-                    )
-                } else {
-                    when {
-                        !files.hasStorageAccess -> PrimaryButton(
-                            text = "GRANT STORAGE PERMISSION",
-                            icon = Icons.Default.FolderOpen,
-                            enabled = !isLaunching && !isUpdating,
-                            onClick = { StorageUtils.requestManageExternalStoragePermission(context) },
-                        )
-                        files.needsInstall -> {
-                            PrimaryButton(
-                                text = if (files.isLegacyBeta) "UPGRADE TO FULL RELEASE" else "DOWNLOAD & INSTALL",
-                                icon = Icons.Default.Download,
-                                enabled = !isLaunching && !isUpdating,
-                                onClick = ::performInstall,
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            OutlinedButton(
-                                onClick = { folderPicker.launch(null) },
-                                modifier = Modifier.fillMaxWidth(0.85f).height(48.dp),
-                                shape = RoundedCornerShape(14.dp),
-                            ) {
-                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp), tint = WowGold)
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text("LOCATE EXISTING FILES", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WowGold)
-                            }
-                        }
-                        versionStatus?.isOutdated == true -> {
-                            PrimaryButton(
-                                text = "UPDATE TO ${versionStatus?.remoteVersion}",
-                                icon = Icons.Default.Refresh,
-                                enabled = canPlay,
-                                onClick = ::performUpdate,
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            OutlinedButton(
-                                onClick = ::launchGame,
-                                enabled = canPlay,
-                                modifier = Modifier.fillMaxWidth(0.85f).height(48.dp),
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Text(text = "LAUNCH ANYWAY (OUTDATED)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WowError)
-                            }
-                        }
-                        else -> PrimaryButton(
-                            text = if (files.isWrongGame) "WOW FOREVER REQUIRED" else "PLAY WORLD OF WARCRAFT",
-                            icon = Icons.Default.PlayArrow,
-                            enabled = canPlay,
-                            onClick = ::launchGame,
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
+            if (!isBusy) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     // Wraps onto a second line on narrow portrait phones, where a Row squeezed the last button's text
                     // into one letter per line and hid the login option (#44).
                     FlowRow(
