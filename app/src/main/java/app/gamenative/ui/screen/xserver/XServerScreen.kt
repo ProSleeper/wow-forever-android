@@ -2715,8 +2715,9 @@ fun XServerScreen(
             )
         }
 
-        // The typing and edge guard buttons belong to touch play, so they come and go with the on-screen controls.
-        val showTouchButtons = areControlsVisible && !isEditMode && !showQuickMenu
+        // The buttons over the game belong to touch play, so they show with the on-screen controller and in touchscreen
+        // mode alike.
+        val showTouchButtons = (areControlsVisible || isTouchscreenModeActive) && !isEditMode && !showQuickMenu
         TypingAids(
             showButtons = showTouchButtons,
             line = typedLine,
@@ -2727,6 +2728,19 @@ fun XServerScreen(
         )
         if (showTouchButtons) {
             EdgeGuardButton(edgeGuard)
+        }
+        // Shown whenever the side menu is, so that it can always switch back, even with the controller put away.
+        if (!isEditMode && !showQuickMenu) {
+            ControlModeButton(
+                touchscreenMode = isTouchscreenModeActive,
+                onSwitch = {
+                    // The side menu's own two switches, in one tap: touchscreen mode puts the controller away when it
+                    // goes on and brings it back when it goes off, unless a physical controller or keyboard is attached.
+                    val toController = isTouchscreenModeActive
+                    onQuickMenuItemSelected(QuickMenuAction.TOUCHSCREEN_MODE)
+                    if (toController && !areControlsVisible) onQuickMenuItemSelected(QuickMenuAction.INPUT_CONTROLS)
+                },
+            )
         }
 
         QuickMenu(
