@@ -54,11 +54,6 @@ class IMEInputReceiver(
         private const val BACKSPACE = '\b'
         private const val ENTER = '\n'
         private const val TAB = '\t'
-        private const val ESCAPE = '\u001b'
-
-        // Not a key: a wait in the queue of keystrokes, for when the game needs a moment to act on the one before.
-        private const val PAUSE = '\u0000'
-        private const val PAUSE_MS = 200L
 
         // Wine reads a spare key's character when the game gets round to the keystroke, so the same spare key must not
         // be pointed at another character before then. This gap spaces out a burst, such as a paste.
@@ -72,9 +67,6 @@ class IMEInputReceiver(
     var onLineChanged: ((String) -> Unit)? = null
 
     private var imeSessionActive = false
-
-    // Whether the keyboard was brought up for chat, which keeps the game's chat box open for as long as it's up.
-    private var chatting = false
 
     // The line the keyboard is editing, and the keystrokes that keep the game's text field in step with it.
     private val line = SpannableStringBuilder()
@@ -206,23 +198,6 @@ class IMEInputReceiver(
         mirror.sync(line)
         sendKey(key)
         startNewLine()
-        // Sending a chat line closes the chat box, and the next one needs it open again. The game has to finish with
-        // the first Enter before the second one means "open".
-        if (chatting && key == ENTER) {
-            sendKey(PAUSE)
-            openChatBox()
-        }
-    }
-
-    private fun openChatBox() {
-        sendKey(ENTER)
-    }
-
-    /** Closes the chat box that [openChat] kept open. Escape also throws away a line that wasn't sent. */
-    private fun closeChatBox() {
-        if (!chatting) return
-        chatting = false
-        sendKey(ESCAPE)
     }
 
     private fun startNewLine() {
@@ -265,12 +240,7 @@ class IMEInputReceiver(
     private fun drainKeys() {
         sendingKeys = true
         while (pendingKeys.isNotEmpty()) {
-            val key = pendingKeys.removeFirst()
-            if (key == PAUSE) {
-                postDelayed(resumeKeys, PAUSE_MS)
-                return
-            }
-            val usedSpareKey = pressKey(key)
+            val usedSpareKey = pressKey(pendingKeys.removeFirst())
             if (usedSpareKey && pendingKeys.isNotEmpty()) {
                 postDelayed(resumeKeys, SPARE_KEY_GAP_MS)
                 return
@@ -285,10 +255,6 @@ class IMEInputReceiver(
             key == BACKSPACE -> {
                 xServer.injectKeyPress(XKeycode.KEY_BKSP, 0)
                 xServer.injectKeyRelease(XKeycode.KEY_BKSP)
-            }
-            key == ESCAPE -> {
-                xServer.injectKeyPress(XKeycode.KEY_ESC, 0)
-                xServer.injectKeyRelease(XKeycode.KEY_ESC)
             }
             charToKeyDispatch(key) != null -> sendCharacterToGame(key)
             else -> return xServer.injectUnicodeChar(key.code)
@@ -406,15 +372,6 @@ class IMEInputReceiver(
         }
     }
 
-    /** Shows the keyboard with the game's chat box open, and keeps the box open until the keyboard is put away. */
-    fun openChat() {
-        showKeyboard()
-        post {
-            chatting = true
-            openChatBox()
-        }
-    }
-
     fun hideKeyboard() {
         post {
             inputMethodManager()?.hideSoftInputFromWindow(windowToken, 0)
@@ -422,7 +379,6 @@ class IMEInputReceiver(
             imeSessionActive = false
             isFocusable = false
             isFocusableInTouchMode = false
-            closeChatBox()
             clearLine()
             Timber.d("IMEInputReceiver: Requested to hide keyboard")
         }
@@ -430,9 +386,6 @@ class IMEInputReceiver(
 
     /** For a keyboard that was put away with its own hide key: the line it was editing is over. */
     fun onKeyboardGone() {
-        post {
-            closeChatBox()
-            clearLine()
-        }
+        post { clearLine() }
     }
 }

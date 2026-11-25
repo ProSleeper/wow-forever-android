@@ -74,7 +74,6 @@ internal fun Modifier.liftedAboveKeyboard(): Modifier {
 internal fun BoxScope.TypingAids(
     showButtons: Boolean,
     line: String,
-    onOpenChat: () -> Unit,
     onShowKeyboard: () -> Unit,
     onHideKeyboard: () -> Unit,
     onKeyboardGone: () -> Unit,
@@ -95,7 +94,7 @@ internal fun BoxScope.TypingAids(
         TypedLine(line, lineHidden, keyboardHeight, onToggleHidden = { lineHidden = !lineHidden })
     }
     if (showButtons) {
-        TypingButton(keyboardShown, onOpenChat, onShowKeyboard, onHideKeyboard)
+        TypingButton(keyboardShown, onShowKeyboard, onHideKeyboard)
     }
 }
 
@@ -124,20 +123,18 @@ private fun BoxScope.TypedLine(line: String, hidden: Boolean, keyboardHeight: In
 }
 
 /**
- * One button for the keyboard. A tap brings it up for chat, with the game's chat box open, since chat is what it's
- * nearly always for. Holding the button brings up the keyboard alone, for a login or a search field, where the Enter
- * that closes the chat box afterwards would submit the field instead. With the keyboard up, a tap puts it away.
+ * Brings up the Android keyboard in one tap, and puts it away with the next. It types into whatever text field the
+ * game has open and opens none itself (user request, 2026-11-25).
  */
 @Composable
-private fun TypingButton(keyboardShown: Boolean, onOpenChat: () -> Unit, onShowKeyboard: () -> Unit, onHideKeyboard: () -> Unit) {
+private fun TypingButton(keyboardShown: Boolean, onShowKeyboard: () -> Unit, onHideKeyboard: () -> Unit) {
     FloatingButton(
         keyX = KEY_BUTTON_X,
         keyY = KEY_BUTTON_Y,
         defaultPlace = Offset(0.62f, 0.02f),
         icon = if (keyboardShown) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
         contentDescription = "Keyboard",
-        onClick = if (keyboardShown) onHideKeyboard else onOpenChat,
-        onLongClick = if (keyboardShown) null else onShowKeyboard,
+        onClick = if (keyboardShown) onHideKeyboard else onShowKeyboard,
     )
 }
 
