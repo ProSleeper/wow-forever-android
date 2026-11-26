@@ -30,6 +30,7 @@ import app.gamenative.PrefManager
 import app.gamenative.events.AndroidEvent
 import app.gamenative.ui.PluviaMain
 import app.gamenative.ui.enums.Orientation
+import app.gamenative.ui.screen.wow.UnfoldedAspect
 import app.gamenative.ui.util.LocalSnackbarHostController
 import app.gamenative.ui.util.SnackbarHostController
 import app.gamenative.utils.LocaleHelper
@@ -158,6 +159,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        UnfoldedAspect.record(this)
         PluviaApp.isActivityInForeground = true
         // The game may have finished booting while the app was in the background, when Android doesn't allow
         // starting a foreground service.
@@ -244,6 +246,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        // Folding and unfolding land here, as the activity handles screen size changes itself.
+        UnfoldedAspect.record(this)
         // Log.d("MainActivity", "Requested orientation: $requestedOrientation => ${Orientation.fromActivityInfoValue(requestedOrientation)}")
     }
 

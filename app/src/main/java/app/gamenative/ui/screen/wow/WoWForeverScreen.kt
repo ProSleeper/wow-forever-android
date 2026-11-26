@@ -110,6 +110,7 @@ fun WoWForeverScreen(
     var motionTapSound by remember { mutableStateOf(MotionTapSound.enabled(context)) }
     var region by remember(gamePath, files) { mutableStateOf(GameRegion.current(context, gamePath)) }
     var resolution by remember { mutableStateOf(RenderResolution.current(context, gpu.screenSize)) }
+    var aspectMode by remember { mutableStateOf(AspectMode.current(context)) }
     var showLoginDialog by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf(READY_STATUS) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -222,7 +223,7 @@ fun WoWForeverScreen(
 
         launchJob = scope.launch {
             try {
-                val screenSize = fitScreenSizeToWindow(context, resolution.size)
+                val screenSize = fitScreenSizeToWindow(context, resolution.size, aspectMode)
                 val containerId = withContext(Dispatchers.IO) {
                     prepareLaunch(context, File(gamePath), gpu, screenSize) { msg ->
                         scope.launch(Dispatchers.Main) { statusText = msg }
@@ -581,7 +582,7 @@ fun WoWForeverScreen(
 
                     Text(text = "Target Path: $gamePath", fontSize = 11.sp, color = WowSubtle, maxLines = 2)
 
-                    Row {
+                    FlowRow {
                         OptionMenu("Region: ${region.label}", Icons.Default.Public, GameRegion.entries, region, { it.label }, !isLaunching && !isUpdating) {
                             GameRegion.save(context, it)
                             region = it
@@ -592,6 +593,13 @@ fun WoWForeverScreen(
                         OptionMenu("Resolution: ${resolution.label}", Icons.Default.AspectRatio, RenderResolution.entries, resolution, { it.label }, !isLaunching) {
                             RenderResolution.save(context, it)
                             resolution = it
+                        }
+                        OptionMenu("Aspect: ${aspectMode.label}", Icons.Default.AspectRatio, AspectMode.entries, aspectMode, { it.label }, !isLaunching) {
+                            AspectMode.save(context, it)
+                            aspectMode = it
+                            if (it == AspectMode.UNFOLDED && UnfoldedAspect.saved(context) == null) {
+                                SnackbarManager.show("Unfold the phone once so the app can learn the inner screen's shape.")
+                            }
                         }
                     }
 
@@ -1270,8 +1278,10 @@ private data class GpuProfile(val driver: String, val tuDebug: String, val scree
  * Reshapes the GPU's 16:9 render budget to the current window's aspect ratio so the game fills
  * non-16:9 screens (e.g. a foldable's near-square inner display) instead of being letterboxed.
  * The pixel count stays the same as [baseSize], so GPU cost matches the 16:9 default.
+ * With [AspectMode.UNFOLDED] it takes the foldable's unfolded shape instead, once the app has seen it.
  */
-private fun fitScreenSizeToWindow(context: Context, baseSize: String): String {
+private fun fitScreenSizeToWindow(context: Context, baseSize: String, mode: AspectMode): String {
+    if (mode == AspectMode.UNFOLDED) UnfoldedAspect.saved(context)?.let { return fitScreenSize(baseSize, it) }
     val (windowWidth, windowHeight) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         context.getSystemService(WindowManager::class.java).currentWindowMetrics.bounds.let { it.width() to it.height() }
     } else {
@@ -1280,10 +1290,12 @@ private fun fitScreenSizeToWindow(context: Context, baseSize: String): String {
     return fitScreenSize(baseSize, windowWidth, windowHeight)
 }
 
-internal fun fitScreenSize(baseSize: String, windowWidth: Int, windowHeight: Int): String {
-    if (windowWidth <= 0 || windowHeight <= 0) return baseSize
+internal fun fitScreenSize(baseSize: String, windowWidth: Int, windowHeight: Int): String =
+    UnfoldedAspect.aspectOf(windowWidth, windowHeight)?.let { fitScreenSize(baseSize, it) } ?: baseSize
+
+/** [baseSize]'s pixel count in the shape [aspect] (long side over short side), landscape. */
+internal fun fitScreenSize(baseSize: String, aspect: Float): String {
     val (baseWidth, baseHeight) = baseSize.split("x").map { it.toInt() }
-    val aspect = maxOf(windowWidth, windowHeight).toFloat() / minOf(windowWidth, windowHeight)
     val height = sqrt(baseWidth * baseHeight / aspect)
     val width = height * aspect
     return "${(width / 2).roundToInt() * 2}x${(height / 2).roundToInt() * 2}"

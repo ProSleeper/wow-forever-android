@@ -34,4 +34,18 @@ class FitScreenSizeTest {
     fun unknownWindow_keepsBaseSize() {
         assertEquals("1280x720", fitScreenSize("1280x720", 0, 0))
     }
+
+    @Test
+    fun unfoldedAspect_shapesTheGameForTheInnerScreenWhileFolded() {
+        // A Fold 7's inner screen is 2184x1968; folded, the window is the 2520x1080 cover screen.
+        val unfolded = UnfoldedAspect.aspectOf(2184, 1968)!!
+        assertEquals(fitScreenSize("1280x720", 2184, 1968), fitScreenSize("1280x720", unfolded))
+        assertEquals("1012x912", fitScreenSize("1280x720", unfolded))
+    }
+
+    @Test
+    fun aspectOf_isLongSideOverShortSide() {
+        assertEquals(2.3333333f, UnfoldedAspect.aspectOf(1080, 2520)!!, 0.0001f)
+        assertEquals(null, UnfoldedAspect.aspectOf(0, 1080))
+    }
 }
